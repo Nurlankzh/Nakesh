@@ -34,7 +34,7 @@ from aiogram.client.default import DefaultBotProperties
 
 # --------------------------- CONFIGURATION ---------------------------
 
-BOT_TOKEN = os.getenv("9012314155:AAEOD81qzAAzRVYNuwA0OkHNL_wvsMF4Rvk", "").strip()
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID_RAW = os.getenv("ADMIN_ID", "8942851703").strip()
 DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3").strip()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "JOKWRHUB18").strip().lstrip("@")
