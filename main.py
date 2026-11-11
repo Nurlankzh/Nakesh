@@ -32,11 +32,11 @@ ADMIN_ID = 8942851703
 ADMIN_USERNAME = "JOKWRHUB18"
 DB_PATH = "/data/bot.sqlite3"
 
-# ========== ӨЗГЕРТУ КЕРЕК ==========
-CHANNEL_ID = -3887449033                    # Канал ID (санмен)
-CHANNEL_LINK = "https://t.me/jokerHubkz     # Канал сілтемесі
-SECOND_BOT_USERNAME = "@qozdirushibot"          # Екінші бот username (@сыз)
-SECOND_BOT_LINK = f"https://t.me/{qozdirushibot}"
+# ========== СІЗДІҢ ДЕРЕКТЕРІҢІЗ ==========
+CHANNEL_ID = -1003887449033
+CHANNEL_LINK = "https://t.me/jokerHubkz"          # Канал сілтемесі
+SECOND_BOT_USERNAME = "qozdirushibot"
+SECOND_BOT_LINK = "https://t.me/qozdirushibot"
 # ===================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
