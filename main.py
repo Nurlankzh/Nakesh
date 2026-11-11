@@ -28,7 +28,7 @@ from aiogram.types import (
 from aiogram.client.default import DefaultBotProperties
 
 # ====================== CONFIG ======================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "9012314155:AAEODB1q2AAZRVYNUWAOOKHINL_WVSMF4Ryk")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "9012314155:AAEoGUo4q-0KmSZQKJIasyzX_YeK5YXr9fI")
 ADMIN_ID = 8942851703
 ADMIN_USERNAME = "JOKWRHUB18"
 DB_PATH = os.getenv("DB_PATH", "/data/bot.sqlite3")
