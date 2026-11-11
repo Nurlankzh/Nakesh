@@ -185,7 +185,6 @@ CREATE INDEX IF NOT EXISTS idx_submissions_cat ON submissions(category, status);
 
 async def init_db():
     global db
-    # /data папкасы жоқ болса, автоматты түрде жасаймыз
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
@@ -270,8 +269,6 @@ async def is_subscribed(user_id: int) -> bool:
         return False
 
 async def check_access(message_or_call, user_id: int) -> bool:
-    """Проверяет подписку на канал и второй бот. Возвращает True если всё ок."""
-    # 1. Канал
     if not await is_subscribed(user_id):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=TEXT["join_btn"], url=CHANNEL_LINK)],
@@ -285,7 +282,6 @@ async def check_access(message_or_call, user_id: int) -> bool:
             await message_or_call.answer(text, reply_markup=kb)
         return False
 
-    # 2. Второй бот
     row = await get_user(user_id)
     if not row or not row["second_bot_checked"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[
