@@ -29,26 +29,23 @@ from aiogram.types import (
 )
 from aiogram.client.default import DefaultBotProperties
 
+=
 # ====================== CONFIG ======================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-ADMIN_ID = int(os.getenv("ADMIN_ID", "8942851703"))
+ADMIN_ID_RAW = os.getenv("ADMIN_ID", "8942851703").strip()
 DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3").strip()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "JOKWRHUB18").strip().lstrip("@")
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN жоқ")
+    raise RuntimeError("BOT_TOKEN environment variable is missing")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-log = logging.getLogger("bot")
-
-router = Router()
-dp = Dispatcher()
-dp.include_router(router)
-bot: Optional[Bot] = None
-db: Optional[aiosqlite.Connection] = None
+try:
+    ADMIN_ID = int(ADMIN_ID_RAW)
+except (ValueError, TypeError):
+    raise RuntimeError(
+        f"ADMIN_ID дұрыс емес: '{ADMIN_ID_RAW}'. "
+        "Railway Variables-қа тек сан қойыңыз (мысалы: 8942851703)"
+    )
 
 # ====================== TEXT ======================
 CATEGORIES = ("kz", "kids", "ru", "us")
