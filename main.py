@@ -30,7 +30,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 # =========================================================
 
 BOT_TOKEN = "9012314155:AAEoGUo4q-0KmSZQKJIasyzX_YeK5YXr9fI"
-ADMIN_ID_RAW = os.getenv("ADMIN_ID", "")
+ADMIN_ID_RAW = os.getenv("ADMIN_ID", "6303091468)
 ADMIN_USERNAME_ENV = os.getenv("ADMIN_USERNAME", "")
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
