@@ -31,22 +31,23 @@ from aiogram.client.default import DefaultBotProperties
 
 =
 # ====================== CONFIG ======================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-ADMIN_ID_RAW = os.getenv("ADMIN_ID", "8942851703").strip()
-DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3").strip()
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "JOKWRHUB18").strip().lstrip("@")
+import os
+
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "8942851703").strip()
+DB_PATH = (os.getenv("DB_PATH") or "bot_data.sqlite3").strip()
+ADMIN_USERNAME = (os.getenv("ADMIN_USERNAME") or "JOKWRHUB18").strip().lstrip("@")
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable is missing")
+    raise RuntimeError("❌ BOT_TOKEN жоқ. Railway Variables-қа қосыңыз.")
 
-try:
-    ADMIN_ID = int(ADMIN_ID_RAW)
-except (ValueError, TypeError):
+if not ADMIN_ID_RAW or not ADMIN_ID_RAW.isdigit():
     raise RuntimeError(
-        f"ADMIN_ID дұрыс емес: '{ADMIN_ID_RAW}'. "
-        "Railway Variables-қа тек сан қойыңыз (мысалы: 8942851703)"
+        f"❌ ADMIN_ID дұрыс емес: '{ADMIN_ID_RAW}'\n"
+        "Railway → Variables → ADMIN_ID = 8942851703 (тек сан)"
     )
 
+ADMIN_ID = int(ADMIN_ID_RAW)
 # ====================== TEXT ======================
 CATEGORIES = ("kz", "kids", "ru", "us")
 
