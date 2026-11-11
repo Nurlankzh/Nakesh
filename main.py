@@ -8,6 +8,7 @@ Telegram Content + Referral Bot
 
 import asyncio
 import logging
+import os
 import time
 from contextlib import suppress
 from typing import Optional
@@ -27,14 +28,14 @@ from aiogram.types import (
 from aiogram.client.default import DefaultBotProperties
 
 # ====================== CONFIG ======================
-BOT_TOKEN = "9012314155:AAEODB1q2AAZRVYNUWAOOKHINL_WVSMF4Ryk"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "9012314155:AAEODB1q2AAZRVYNUWAOOKHINL_WVSMF4Ryk")
 ADMIN_ID = 8942851703
 ADMIN_USERNAME = "JOKWRHUB18"
-DB_PATH = "/data/bot.sqlite3"
+DB_PATH = os.getenv("DB_PATH", "/data/bot.sqlite3")
 
 # ========== СІЗДІҢ ДЕРЕКТЕРІҢІЗ ==========
 CHANNEL_ID = -1003887449033
-CHANNEL_LINK = "https://t.me/jokerHubkz"          # Канал сілтемесі
+CHANNEL_LINK = "https://t.me/jokerHubkz"
 SECOND_BOT_USERNAME = "qozdirushibot"
 SECOND_BOT_LINK = "https://t.me/qozdirushibot"
 # ===================================
@@ -184,6 +185,8 @@ CREATE INDEX IF NOT EXISTS idx_submissions_cat ON submissions(category, status);
 
 async def init_db():
     global db
+    # /data папкасы жоқ болса, автоматты түрде жасаймыз
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
@@ -390,7 +393,6 @@ async def cmd_start(message: Message):
 async def cb_check_sub(call: CallbackQuery):
     if await is_subscribed(call.from_user.id):
         await call.answer("Подписка подтверждена ✅", show_alert=True)
-        # Екінші ботты тексереміз
         if not await check_access(call, call.from_user.id):
             return
         await call.message.answer(TEXT["welcome"], reply_markup=main_kb())
@@ -449,7 +451,6 @@ async def text_handler(message: Message):
         await message.answer("Выберите категорию:", reply_markup=categories_kb())
         return
 
-    # Категория таңдау
     for cat, label in CATEGORY_LABELS.items():
         if text == label:
             await set_submit_category(message.from_user.id, f"view:{cat}")
@@ -526,7 +527,6 @@ async def text_handler(message: Message):
         await message.answer(f"💬 @{ADMIN_USERNAME}", reply_markup=main_kb())
         return
 
-    # Қалыпты мәтін — админге
     await forward_to_admin(message)
 
 @router.message(F.content_type.in_({"photo", "video", "document", "animation"}))
@@ -793,7 +793,6 @@ async def admin_message(message: Message):
             await process_upload(message, state["category"])
             return
 
-    # Reply арқылы жауап
     if message.reply_to_message:
         cur = await db.execute(
             "SELECT user_id FROM admin_message_map WHERE admin_message_id=?",
@@ -1065,16 +1064,18 @@ async def resume_pending():
 
 async def main():
     global bot
-    await init_db()
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    await bot.set_my_commands([BotCommand(command="start", description="Запустить бота")])
-    await resume_pending()
-    log.info("Bot started | DB=%s", DB_PATH)
     try:
+        await init_db()
+        bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        await bot.set_my_commands([BotCommand(command="start", description="Запустить бота")])
+        await resume_pending()
+        log.info("Bot started | DB=%s", DB_PATH)
         await dp.start_polling(bot)
     finally:
-        await db.close()
-        await bot.session.close()
+        if db is not None:
+            await db.close()
+        if bot is not None:
+            await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
