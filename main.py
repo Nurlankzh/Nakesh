@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Telegram content/referral bot — single-file implementation.
+Telegram Content + Referral Bot
 Python 3.11+
-Install: pip install -U aiogram aiosqlite
-Run: BOT_TOKEN="..." ADMIN_ID="8942851703" DB_PATH="/data/bot.sqlite3" python main.py
+Railway-ready single file.
 
-IMPORTANT:
-- Put DB_PATH on a persistent disk/volume supplied by your host.
-- A single Python file does NOT make ephemeral hosting storage persistent.
-- Use only content you own or are authorized to distribute.
+Install: pip install -U aiogram aiosqlite
+Run: BOT_TOKEN=... ADMIN_ID=... python main.py
 """
 
 import asyncio
@@ -28,92 +25,109 @@ from aiogram.exceptions import (
 from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    BotCommand, InputMediaPhoto, InputMediaVideo,
+    BotCommand,
 )
 from aiogram.client.default import DefaultBotProperties
 
-# --------------------------- CONFIGURATION ---------------------------
-
+# ====================== CONFIG ======================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-ADMIN_ID_RAW = os.getenv("ADMIN_ID", "8942851703").strip()
+ADMIN_ID = int(os.getenv("ADMIN_ID", "8942851703"))
 DB_PATH = os.getenv("DB_PATH", "bot_data.sqlite3").strip()
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "JOKWRHUB18").strip().lstrip("@")
+
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable is missing.")
-try:
-    ADMIN_ID = int(ADMIN_ID_RAW)
-except ValueError:
-    raise RuntimeError("ADMIN_ID must be a numeric Telegram user ID.")
+    raise RuntimeError("BOT_TOKEN жоқ")
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s",
 )
-log = logging.getLogger("content_bot")
+log = logging.getLogger("bot")
 
 router = Router()
 dp = Dispatcher()
 dp.include_router(router)
 bot: Optional[Bot] = None
+db: Optional[aiosqlite.Connection] = None
 
+# ====================== TEXT ======================
 CATEGORIES = ("kz", "kids", "ru", "us")
+
 CATEGORY_LABELS = {
-    "kz": {"kk": "🇰🇿 Қазақша каналдар", "ru": "🇰🇿 Казахские каналы"},
-    "kids": {"kk": "🧸 Детский каналдар", "ru": "🧸 Детские каналы"},
-    "ru": {"kk": "🇷🇺 Орысша каналдар", "ru": "🇷🇺 Русские каналы"},
-    "us": {"kk": "🇺🇸 Американша каналдар", "ru": "🇺🇸 Американские каналы"},
+    "kz":   {"kk": "🇰🇿 Қазақша", "ru": "🇰🇿 Казахские"},
+    "kids": {"kk": "🧸 Детские", "ru": "🧸 Детские"},
+    "ru":   {"kk": "🇷🇺 Орысша", "ru": "🇷🇺 Русские"},
+    "us":   {"kk": "🇺🇸 Американша", "ru": "🇺🇸 Американские"},
 }
+
 TEXT = {
     "kk": {
         "choose": "Тілді таңдаңыз:",
-        "welcome": "🔥 ҚОШ КЕЛДІҢІЗ!\n\nСізді ерекше атмосфера мен қызықты контент күтеді. 😉\n\nҚалаған бөліміңізді таңдаңыз. Кейбір қызықтарды сөзбен жеткізу мүмкін емес... 💋",
+        "welcome": "🔥 ҚОШ КЕЛДІҢІЗ!\n\nҚалаған бөлімді таңдаңыз.",
         "channels": "📂 Каналдар",
         "free": "🎁 Тегін канал",
-        "help": "ℹ️ Көмекші",
+        "help": "ℹ️ Көмек",
         "contact": "💬 Админге жазу",
         "back": "⬅️ Артқа",
         "home": "🏠 Басты меню",
         "preview": "👁 Алдын ала көру",
         "buy": "🔞 Сатып алу",
-        "no_preview": "Бұл бөлімде әзірге алдын ала көру материалы жоқ.",
-        "buy_text": "Сәлеметсіз бе! Сатып алу туралы ақпарат беріңіз.",
-        "contact_text": "Хабарламаңызды жазыңыз. Ол байланыс бөліміне жіберіледі.",
-        "sent": "Хабарламаңыз жіберілді.",
-        "blocked": "Бұл ботты пайдалану мүмкіндігі шектелген.",
-        "help_text": "💡 БОТТЫ ҚОЛДАНУ НҰСҚАУЛЫҒЫ\n\n📂 Каналдар — өзіңізге ұнайтын категорияны таңдап, қолжетімді материалдармен алдын ала танысыңыз. Сатып алу туралы ақпарат алу үшін тиісті батырманы басыңыз.\n\n🎁 Тегін канал — жеке сілтемеңізді достарыңызбен бөлісіп, жаңа қолданушыларды шақырыңыз. Қажетті шарт орындалған соң тегін каналға қол жеткізесіз.\n\n💬 Админге жазу — сұрақтарыңыз немесе ұсыныстарыңыз болса, хабарлама қалдырыңыз.\n\n✨ Қажетті бөлімді таңдап, нұсқауларды орындасаңыз жеткілікті!",
-        "ref_text": "🎁 ТЕГІН КАНАЛ\n\nЖеке сілтемеңізді достарыңызға жіберіңіз. Достарыңыз ботқа осы сілтеме арқылы алғаш рет кірген сайын шақырылғандар саны есептеледі.\n\nШарт орындалғаннан кейін тегін каналға арналған сілтеме автоматты түрде беріледі.\n\nСіздің сілтемеңіз:\n{link}\n\nШақырылғандар: {count}\nҚажетті шарт: {required}",
+        "no_preview": "Бұл бөлімде әзірге материал жоқ.",
+        "buy_text": "Сатып алу туралы ақпарат алу үшін админге жазыңыз.",
+        "contact_text": "Хабарламаңызды жазыңыз. Админге жіберіледі.",
+        "sent": "✅ Хабарламаңыз жіберілді.",
+        "blocked": "🚫 Ботты пайдалану шектелген.",
+        "help_text": (
+            "💡 НҰСҚАУЛЫҚ\n\n"
+            "📂 Каналдар — категорияны таңдап, материалды көріңіз.\n"
+            "🎁 Тегін канал — достарыңызды шақырып, тегін қол жеткізіңіз.\n"
+            "💬 Админге жазу — сұрақтарыңыз болса жазыңыз."
+        ),
+        "ref_text": (
+            "🎁 ТЕГІН КАНАЛ\n\n"
+            "Жеке сілтемеңізді достарыңызға жіберіңіз.\n\n"
+            "Сілтеме:\n{link}\n\n"
+            "Шақырылған: {count} / {required}"
+        ),
         "share": "Досыңа жіберу",
-        "link_missing": "Тегін канал сілтемесі әзірге орнатылмаған. Кейінірек қайталап көріңіз.",
-        "reward": "🎉 Құттықтаймыз! Тегін каналға кіру сілтемесі:\n{link}",
-        "admin_contact": "💬 Сұрақтарыңыз болса, мына аккаунтқа жазыңыз: @{username}",
+        "reward": "🎉 Құттықтаймыз!\nТегін канал:\n{link}",
+        "admin_contact": "Админ: @{username}",
     },
     "ru": {
         "choose": "Выберите язык:",
-        "welcome": "🔥 ДОБРО ПОЖАЛОВАТЬ!\n\nВас ждут особая атмосфера и интересный контент. 😉\n\nВыберите нужный раздел. Некоторые впечатления невозможно передать словами... 💋",
+        "welcome": "🔥 ДОБРО ПОЖАЛОВАТЬ!\n\nВыберите нужный раздел.",
         "channels": "📂 Каналы",
         "free": "🎁 Бесплатный канал",
         "help": "ℹ️ Помощь",
-        "contact": "💬 Написать администратору",
+        "contact": "💬 Написать админу",
         "back": "⬅️ Назад",
         "home": "🏠 Главное меню",
-        "preview": "👁 Предварительный просмотр",
+        "preview": "👁 Предпросмотр",
         "buy": "🔞 Купить",
-        "no_preview": "В этом разделе пока нет материалов для предварительного просмотра.",
-        "buy_text": "Здравствуйте! Предоставьте, пожалуйста, информацию о покупке.",
-        "contact_text": "Напишите ваше сообщение. Оно будет передано для ответа.",
-        "sent": "Ваше сообщение отправлено.",
-        "blocked": "Доступ к этому боту ограничен.",
-        "help_text": "💡 ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ БОТА\n\n📂 Каналы — выберите интересующую категорию и ознакомьтесь с доступными материалами. Чтобы узнать условия покупки, нажмите соответствующую кнопку.\n\n🎁 Бесплатный канал — поделитесь личной ссылкой с друзьями и приглашайте новых пользователей. После выполнения условия вы получите доступ к бесплатному каналу.\n\n💬 Написать администратору — оставьте сообщение, если у вас есть вопросы или предложения.\n\n✨ Выберите нужный раздел и следуйте инструкциям!",
-        "ref_text": "🎁 БЕСПЛАТНЫЙ КАНАЛ\n\nОтправьте личную ссылку друзьям. Каждый новый пользователь, впервые открывший бота по вашей ссылке, будет засчитан.\n\nПосле выполнения условия бот автоматически выдаст ссылку на бесплатный канал.\n\nВаша ссылка:\n{link}\n\nПриглашено: {count}\nНеобходимое условие: {required}",
+        "no_preview": "В этом разделе пока нет материалов.",
+        "buy_text": "Напишите администратору для покупки.",
+        "contact_text": "Напишите сообщение. Оно будет передано админу.",
+        "sent": "✅ Ваше сообщение отправлено.",
+        "blocked": "🚫 Доступ ограничен.",
+        "help_text": (
+            "💡 ИНСТРУКЦИЯ\n\n"
+            "📂 Каналы — выберите категорию и посмотрите материалы.\n"
+            "🎁 Бесплатный канал — приглашайте друзей и получите доступ.\n"
+            "💬 Написать админу — если есть вопросы."
+        ),
+        "ref_text": (
+            "🎁 БЕСПЛАТНЫЙ КАНАЛ\n\n"
+            "Отправьте ссылку друзьям.\n\n"
+            "Ваша ссылка:\n{link}\n\n"
+            "Приглашено: {count} / {required}"
+        ),
         "share": "Отправить другу",
-        "link_missing": "Ссылка на бесплатный канал пока не настроена. Попробуйте позже.",
-        "reward": "🎉 Поздравляем! Ссылка на бесплатный канал:\n{link}",
-        "admin_contact": "💬 По вопросам напишите сюда: @{username}",
+        "reward": "🎉 Поздравляем!\nБесплатный канал:\n{link}",
+        "admin_contact": "Админ: @{username}",
     },
 }
 
-# --------------------------- DATABASE ---------------------------
-
+# ====================== DATABASE ======================
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
   user_id INTEGER PRIMARY KEY,
@@ -128,16 +142,11 @@ CREATE TABLE IF NOT EXISTS users (
   last_menu_chat_id INTEGER,
   last_menu_message_id INTEGER
 );
-CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS content (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  category TEXT NOT NULL,
-  file_type TEXT NOT NULL,
-  file_id TEXT,
-  caption TEXT,
-  created_at INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS preview_content (
+CREATE TABLE IF NOT EXISTS content (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   category TEXT NOT NULL,
   file_type TEXT NOT NULL,
@@ -148,8 +157,7 @@ CREATE TABLE IF NOT EXISTS preview_content (
 CREATE TABLE IF NOT EXISTS admin_state (
   admin_id INTEGER PRIMARY KEY,
   state TEXT,
-  category TEXT,
-  payload TEXT
+  category TEXT
 );
 CREATE TABLE IF NOT EXISTS broadcast_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,14 +167,13 @@ CREATE TABLE IF NOT EXISTS broadcast_jobs (
   caption TEXT,
   created_at INTEGER NOT NULL,
   sent_count INTEGER NOT NULL DEFAULT 0,
-  failed_count INTEGER NOT NULL DEFAULT 0,
-  last_user_id INTEGER NOT NULL DEFAULT 0
+  failed_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS broadcast_recipients (
   job_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
-  PRIMARY KEY(job_id, user_id)
+  PRIMARY KEY (job_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS admin_message_map (
   admin_message_id INTEGER PRIMARY KEY,
@@ -186,25 +193,21 @@ CREATE TABLE IF NOT EXISTS referrals (
 );
 CREATE INDEX IF NOT EXISTS idx_users_blocked ON users(is_blocked);
 CREATE INDEX IF NOT EXISTS idx_content_category ON content(category);
-CREATE INDEX IF NOT EXISTS idx_broadcast_status ON broadcast_jobs(status);
 """
-
-db: Optional[aiosqlite.Connection] = None
 
 async def init_db():
     global db
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA foreign_keys=ON")
     await db.executescript(SCHEMA)
     defaults = {
         "referral_required": "3",
         "free_channel_url": "",
-        "broadcast_delay": "0.08",
+        "broadcast_delay": "0.07",
     }
-    for key, value in defaults.items():
-        await db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
+    for k, v in defaults.items():
+        await db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
     await db.commit()
 
 async def setting(key: str, default: str = "") -> str:
@@ -215,7 +218,7 @@ async def setting(key: str, default: str = "") -> str:
 async def set_setting(key: str, value: str):
     await db.execute(
         "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (key, str(value)),
+        (key, str(value))
     )
     await db.commit()
 
@@ -234,29 +237,28 @@ async def save_user(user, referrer_id: Optional[int] = None):
     if existing:
         await db.execute(
             "UPDATE users SET username=?, first_name=? WHERE user_id=?",
-            (user.username, user.first_name, user.id),
+            (user.username, user.first_name, user.id)
         )
     else:
         if referrer_id == user.id:
             referrer_id = None
         await db.execute(
-            """INSERT INTO users(user_id,username,first_name,language,joined_at,referrer_id)
-               VALUES(?,?,?,?,?,?)""",
-            (user.id, user.username, user.first_name, "", int(time.time()), referrer_id),
+            """INSERT INTO users(user_id, username, first_name, language, joined_at, referrer_id)
+               VALUES (?, ?, ?, '', ?, ?)""",
+            (user.id, user.username, user.first_name, int(time.time()), referrer_id)
         )
         if referrer_id:
             ref = await get_user(referrer_id)
             if ref and not ref["is_blocked"]:
                 await db.execute(
-                    "INSERT OR IGNORE INTO referrals(invited_id,referrer_id,created_at) VALUES(?,?,?)",
-                    (user.id, referrer_id, int(time.time())),
+                    "INSERT OR IGNORE INTO referrals(invited_id, referrer_id, created_at) VALUES (?,?,?)",
+                    (user.id, referrer_id, int(time.time()))
                 )
                 cur = await db.execute("SELECT changes() AS n")
-                changed = (await cur.fetchone())["n"]
-                if changed:
+                if (await cur.fetchone())["n"]:
                     await db.execute(
-                        "UPDATE users SET referral_count=referral_count+1 WHERE user_id=?",
-                        (referrer_id,),
+                        "UPDATE users SET referral_count = referral_count + 1 WHERE user_id=?",
+                        (referrer_id,)
                     )
     await db.commit()
 
@@ -270,46 +272,34 @@ async def get_lang(user_id: int) -> str:
 
 async def save_menu(user_id: int, chat_id: int, message_id: int):
     await db.execute(
-        "UPDATE users SET last_menu_chat_id=?,last_menu_message_id=? WHERE user_id=?",
-        (chat_id, message_id, user_id),
+        "UPDATE users SET last_menu_chat_id=?, last_menu_message_id=? WHERE user_id=?",
+        (chat_id, message_id, user_id)
     )
     await db.commit()
 
-async def delete_menu(user_id: int):
-    row = await get_user(user_id)
-    if row and row["last_menu_chat_id"] and row["last_menu_message_id"]:
-        with suppress(TelegramAPIError):
-            await bot.delete_message(row["last_menu_chat_id"], row["last_menu_message_id"])
-    await db.execute(
-        "UPDATE users SET last_menu_chat_id=NULL,last_menu_message_id=NULL WHERE user_id=?",
-        (user_id,),
-    )
-    await db.commit()
-
-# --------------------------- KEYBOARDS / MENU ---------------------------
-
+# ====================== KEYBOARDS ======================
 def ikb(rows):
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def btn(text, data):
     return InlineKeyboardButton(text=text, callback_data=data)
 
-def main_keyboard(lang):
+def main_kb(lang):
     t = TEXT[lang]
     return ikb([
         [btn(t["channels"], "channels"), btn(t["free"], "free")],
         [btn(t["help"], "help"), btn(t["contact"], "contact")],
     ])
 
-def back_keyboard(lang, target="home"):
+def back_kb(lang, target="home"):
     return ikb([[btn(TEXT[lang]["back"], target)]])
 
-def categories_keyboard(lang):
+def categories_kb(lang):
     rows = [[btn(CATEGORY_LABELS[c][lang], f"cat:{c}")] for c in CATEGORIES]
     rows.append([btn(TEXT[lang]["back"], "home")])
     return ikb(rows)
 
-def category_keyboard(lang, category):
+def category_kb(lang, category):
     t = TEXT[lang]
     return ikb([
         [btn(t["preview"], f"preview:{category}")],
@@ -317,7 +307,15 @@ def category_keyboard(lang, category):
         [btn(t["back"], "channels")],
     ])
 
-async def show_menu(target: Message | CallbackQuery, user_id: int, text: str, keyboard, edit=True):
+def admin_kb():
+    return ikb([
+        [btn("📂 Контент", "adm:content"), btn("📊 Статистика", "adm:stats")],
+        [btn("📢 Рассылка", "adm:broadcast"), btn("🎁 Реферал", "adm:ref")],
+        [btn("🔗 Тегін сілтеме", "adm:freeurl"), btn("🚫 Бұғаттау", "adm:block")],
+        [btn("⏹ Рассылканы тоқтату", "adm:stop"), btn("🏠 Жабу", "adm:close")],
+    ])
+
+async def show_menu(target, user_id: int, text: str, keyboard):
     if isinstance(target, CallbackQuery):
         msg = target.message
         try:
@@ -327,154 +325,152 @@ async def show_menu(target: Message | CallbackQuery, user_id: int, text: str, ke
         except TelegramBadRequest as e:
             if "message is not modified" in str(e).lower():
                 return
-            if "there is no text" not in str(e).lower():
-                log.info("Menu edit fallback: %s", e)
         sent = await msg.answer(text, reply_markup=keyboard)
     else:
         sent = await target.answer(text, reply_markup=keyboard)
     await save_menu(user_id, sent.chat.id, sent.message_id)
 
-async def ensure_user_menu(message: Message, user_id: int, text: str, keyboard):
-    row = await get_user(user_id)
-    if row and row["last_menu_chat_id"] and row["last_menu_message_id"]:
-        try:
-            await bot.edit_message_text(
-                text, chat_id=row["last_menu_chat_id"],
-                message_id=row["last_menu_message_id"], reply_markup=keyboard
-            )
-            return
-        except TelegramAPIError:
-            pass
-    sent = await message.answer(text, reply_markup=keyboard)
-    await save_menu(user_id, sent.chat.id, sent.message_id)
-
-# --------------------------- USER FLOW ---------------------------
-
+# ====================== USER FLOW ======================
 @router.message(CommandStart())
-async def start_handler(message: Message):
+async def cmd_start(message: Message):
     args = (message.text or "").split(maxsplit=1)
     referrer = None
     if len(args) > 1 and args[1].startswith("ref_"):
         with suppress(ValueError):
             referrer = int(args[1][4:])
+
     await save_user(message.from_user, referrer)
     if referrer:
         await check_referral_reward(referrer)
+
     if await is_blocked(message.from_user.id):
-        await message.answer("🚫 " + TEXT[await get_lang(message.from_user.id)]["blocked"])
+        lang = await get_lang(message.from_user.id)
+        await message.answer(TEXT[lang]["blocked"])
         return
+
     row = await get_user(message.from_user.id)
     if not row or not row["language"]:
-        sent = await message.answer(TEXT["kk"]["choose"], reply_markup=ikb([
-            [btn("🇰🇿 Қазақша", "lang:kk"), btn("🇷🇺 Русский", "lang:ru")]
-        ]))
+        sent = await message.answer(
+            TEXT["kk"]["choose"],
+            reply_markup=ikb([
+                [btn("🇰🇿 Қазақша", "lang:kk"), btn("🇷🇺 Русский", "lang:ru")]
+            ])
+        )
         await save_menu(message.from_user.id, sent.chat.id, sent.message_id)
     else:
         lang = row["language"]
-        await ensure_user_menu(message, message.from_user.id, TEXT[lang]["welcome"], main_keyboard(lang))
+        await show_menu(message, message.from_user.id, TEXT[lang]["welcome"], main_kb(lang))
 
 @router.callback_query(F.data.startswith("lang:"))
-async def language_handler(call: CallbackQuery):
-    lang = call.data.split(":", 1)[1]
+async def set_lang(call: CallbackQuery):
+    lang = call.data.split(":")[1]
     if lang not in ("kk", "ru"):
-        await call.answer("Invalid language", show_alert=True)
-        return
+        return await call.answer()
     await set_language(call.from_user.id, lang)
     await call.answer()
-    await show_menu(call, call.from_user.id, TEXT[lang]["welcome"], main_keyboard(lang))
+    await show_menu(call, call.from_user.id, TEXT[lang]["welcome"], main_kb(lang))
 
 @router.callback_query(F.data == "home")
-async def home_handler(call: CallbackQuery):
+async def home(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
     await call.answer()
-    await show_menu(call, call.from_user.id, TEXT[lang]["welcome"], main_keyboard(lang))
+    await show_menu(call, call.from_user.id, TEXT[lang]["welcome"], main_kb(lang))
 
 @router.callback_query(F.data == "channels")
-async def channels_handler(call: CallbackQuery):
+async def channels(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
     await call.answer()
-    await show_menu(call, call.from_user.id, TEXT[lang]["channels"], categories_keyboard(lang))
+    await show_menu(call, call.from_user.id, TEXT[lang]["channels"], categories_kb(lang))
 
 @router.callback_query(F.data.startswith("cat:"))
-async def category_handler(call: CallbackQuery):
-    category = call.data.split(":", 1)[1]
-    if category not in CATEGORIES:
-        await call.answer("Қате категория", show_alert=True)
-        return
+async def category(call: CallbackQuery):
+    cat = call.data.split(":")[1]
+    if cat not in CATEGORIES:
+        return await call.answer()
     lang = await get_lang(call.from_user.id)
     await call.answer()
-    await show_menu(call, call.from_user.id, CATEGORY_LABELS[category][lang], category_keyboard(lang, category))
+    await show_menu(call, call.from_user.id, CATEGORY_LABELS[cat][lang], category_kb(lang, cat))
 
 @router.callback_query(F.data.startswith("preview:"))
-async def preview_handler(call: CallbackQuery):
-    category = call.data.split(":", 1)[1]
-    if category not in CATEGORIES:
-        await call.answer()
-        return
+async def preview(call: CallbackQuery):
+    cat = call.data.split(":")[1]
+    if cat not in CATEGORIES:
+        return await call.answer()
     lang = await get_lang(call.from_user.id)
+
     cur = await db.execute(
-        "SELECT file_type,file_id,caption FROM content WHERE category=? ORDER BY id DESC LIMIT 10",
-        (category,),
+        "SELECT file_type, file_id, caption FROM content WHERE category=? ORDER BY id DESC LIMIT 8",
+        (cat,)
     )
     items = await cur.fetchall()
     if not items:
-        await call.answer(TEXT[lang]["no_preview"], show_alert=True)
-        return
+        return await call.answer(TEXT[lang]["no_preview"], show_alert=True)
+
     await call.answer()
-    # Preview media are content, not navigation menus. The single menu message remains in place.
     for item in reversed(items):
-        await send_stored_content(call.from_user.id, item)
-    await show_menu(call, call.from_user.id, CATEGORY_LABELS[category][lang], category_keyboard(lang, category))
+        await send_content(call.from_user.id, item)
+
+    await show_menu(call, call.from_user.id, CATEGORY_LABELS[cat][lang], category_kb(lang, cat))
 
 @router.callback_query(F.data.startswith("buy:"))
-async def buy_handler(call: CallbackQuery):
-    category = call.data.split(":", 1)[1]
-    if category not in CATEGORIES:
-        await call.answer()
-        return
+async def buy(call: CallbackQuery):
+    cat = call.data.split(":")[1]
+    if cat not in CATEGORIES:
+        return await call.answer()
     lang = await get_lang(call.from_user.id)
+
     await db.execute(
-        "INSERT INTO purchases(user_id,category,created_at) VALUES(?,?,?)",
-        (call.from_user.id, category, int(time.time())),
+        "INSERT INTO purchases(user_id, category, created_at) VALUES (?,?,?)",
+        (call.from_user.id, cat, int(time.time()))
     )
     await db.commit()
+
     await call.answer()
     await bot.send_message(
         ADMIN_ID,
-        f"🛒 Сатып алу өтініші\nID: {call.from_user.id}\nUsername: @{call.from_user.username or 'жоқ'}\nКатегория: {CATEGORY_LABELS[category]['kk']}\n\nҚолданушыға жауап беру үшін осы хабарламаға Reply жасаңыз."
+        f"🛒 Сатып алу өтініші\n"
+        f"ID: `{call.from_user.id}`\n"
+        f"Username: @{call.from_user.username or 'жоқ'}\n"
+        f"Категория: {CATEGORY_LABELS[cat]['kk']}\n\n"
+        f"Жауап беру үшін осы хабарламаға Reply жасаңыз.",
+        parse_mode=ParseMode.MARKDOWN
     )
     await bot.send_message(call.from_user.id, TEXT[lang]["buy_text"])
     await bot.send_message(call.from_user.id, f"💬 @{ADMIN_USERNAME}")
-    # Keep navigation on the original menu message.
-    await show_menu(call, call.from_user.id, CATEGORY_LABELS[category][lang], category_keyboard(lang, category))
+    await show_menu(call, call.from_user.id, CATEGORY_LABELS[cat][lang], category_kb(lang, cat))
 
 @router.callback_query(F.data == "help")
-async def help_handler(call: CallbackQuery):
+async def help_h(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
     await call.answer()
-    await show_menu(call, call.from_user.id, TEXT[lang]["help_text"], back_keyboard(lang))
+    await show_menu(call, call.from_user.id, TEXT[lang]["help_text"], back_kb(lang))
 
 @router.callback_query(F.data == "contact")
-async def contact_handler(call: CallbackQuery):
+async def contact(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
     await call.answer()
     await bot.send_message(call.from_user.id, TEXT[lang]["contact_text"])
     await bot.send_message(call.from_user.id, f"💬 @{ADMIN_USERNAME}")
-    await show_menu(call, call.from_user.id, TEXT[lang]["admin_contact"].format(username=ADMIN_USERNAME), back_keyboard(lang))
+    await show_menu(
+        call, call.from_user.id,
+        TEXT[lang]["admin_contact"].format(username=ADMIN_USERNAME),
+        back_kb(lang)
+    )
 
 @router.callback_query(F.data == "free")
-async def free_handler(call: CallbackQuery):
+async def free(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
     row = await get_user(call.from_user.id)
     me = await bot.get_me()
     link = f"https://t.me/{me.username}?start=ref_{call.from_user.id}"
     required = await setting("referral_required", "3")
-    text = TEXT[lang]["ref_text"].format(
-        link=link, count=row["referral_count"] if row else 0, required=required
-    )
+    count = row["referral_count"] if row else 0
+
+    text = TEXT[lang]["ref_text"].format(link=link, count=count, required=required)
     reward = await setting("free_channel_url", "")
     if row and row["reward_sent"] and reward:
         text += "\n\n" + TEXT[lang]["reward"].format(link=reward)
+
     kb = ikb([
         [InlineKeyboardButton(text=TEXT[lang]["share"], url=f"https://t.me/share/url?url={link}")],
         [btn(TEXT[lang]["back"], "home")],
@@ -482,20 +478,24 @@ async def free_handler(call: CallbackQuery):
     await call.answer()
     await show_menu(call, call.from_user.id, text, kb)
 
-# --------------------------- CONTENT DELIVERY ---------------------------
-
-async def send_stored_content(user_id: int, item):
-    typ, file_id, caption = item["file_type"], item["file_id"], item["caption"] or ""
-    if typ == "text":
-        await bot.send_message(user_id, caption)
-    elif typ == "photo":
-        await bot.send_photo(user_id, file_id, caption=caption or None)
-    elif typ == "video":
-        await bot.send_video(user_id, file_id, caption=caption or None)
-    elif typ == "document":
-        await bot.send_document(user_id, file_id, caption=caption or None)
-    elif typ == "animation":
-        await bot.send_animation(user_id, file_id, caption=caption or None)
+# ====================== CONTENT ======================
+async def send_content(user_id: int, item):
+    typ = item["file_type"]
+    file_id = item["file_id"]
+    caption = item["caption"] or None
+    try:
+        if typ == "text":
+            await bot.send_message(user_id, caption or "")
+        elif typ == "photo":
+            await bot.send_photo(user_id, file_id, caption=caption)
+        elif typ == "video":
+            await bot.send_video(user_id, file_id, caption=caption)
+        elif typ == "document":
+            await bot.send_document(user_id, file_id, caption=caption)
+        elif typ == "animation":
+            await bot.send_animation(user_id, file_id, caption=caption)
+    except Exception as e:
+        log.warning("send_content failed for %s: %s", user_id, e)
 
 async def check_referral_reward(user_id: int):
     row = await get_user(user_id)
@@ -505,202 +505,205 @@ async def check_referral_reward(user_id: int):
     if row["referral_count"] >= required:
         link = await setting("free_channel_url", "")
         if link:
-            lang = row["language"]
+            lang = row["language"] or "kk"
             await bot.send_message(user_id, TEXT[lang]["reward"].format(link=link))
             await db.execute("UPDATE users SET reward_sent=1 WHERE user_id=?", (user_id,))
             await db.commit()
 
-# --------------------------- USER MESSAGES / ADMIN REPLIES ---------------------------
-
+# ====================== USER → ADMIN ======================
 @router.message(F.from_user.id != ADMIN_ID)
-async def general_message_handler(message: Message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        await admin_message_handler(message)
+async def user_message(message: Message):
+    if await is_blocked(message.from_user.id):
         return
-    if await is_blocked(user_id):
-        return
-    # Every ordinary user message is forwarded to admin, with a reply mapping.
+
     caption = (
-        f"📩 Қолданушыдан хабарлама\n"
-        f"ID: {user_id}\n"
+        f"📩 Қолданушыдан\n"
+        f"ID: `{message.from_user.id}`\n"
         f"Username: @{message.from_user.username or 'жоқ'}\n"
         f"Аты: {message.from_user.full_name}\n\n"
-        "Жауап беру үшін осы хабарламаға Reply жасаңыз."
+        f"Жауап беру үшін Reply жасаңыз."
     )
     try:
         if message.photo:
-            forwarded = await bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption)
+            fwd = await bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
         elif message.video:
-            forwarded = await bot.send_video(ADMIN_ID, message.video.file_id, caption=caption)
+            fwd = await bot.send_video(ADMIN_ID, message.video.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
         elif message.document:
-            forwarded = await bot.send_document(ADMIN_ID, message.document.file_id, caption=caption)
+            fwd = await bot.send_document(ADMIN_ID, message.document.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
         elif message.voice:
-            forwarded = await bot.send_voice(ADMIN_ID, message.voice.file_id, caption=caption)
+            fwd = await bot.send_voice(ADMIN_ID, message.voice.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
         elif message.text:
-            forwarded = await bot.send_message(ADMIN_ID, caption + "\n\n" + message.text)
+            fwd = await bot.send_message(ADMIN_ID, caption + "\n\n" + message.text, parse_mode=ParseMode.MARKDOWN)
         else:
-            forwarded = await bot.send_message(ADMIN_ID, caption + "\n\n[Қолдау көрсетілмейтін хабарлама түрі]")
+            fwd = await bot.send_message(ADMIN_ID, caption + "\n\n[қолдау көрсетілмейтін формат]", parse_mode=ParseMode.MARKDOWN)
+
         await db.execute(
-            "INSERT OR REPLACE INTO admin_message_map(admin_message_id,user_id,created_at) VALUES(?,?,?)",
-            (forwarded.message_id, user_id, int(time.time())),
+            "INSERT OR REPLACE INTO admin_message_map(admin_message_id, user_id, created_at) VALUES (?,?,?)",
+            (fwd.message_id, message.from_user.id, int(time.time()))
         )
         await db.commit()
-        lang = await get_lang(user_id)
+        lang = await get_lang(message.from_user.id)
         await message.answer(TEXT[lang]["sent"])
-    except TelegramAPIError:
-        log.exception("Could not forward user message to admin")
-        lang = await get_lang(user_id)
-        await message.answer("Хабарламаны жеткізу мүмкін болмады. Кейінірек қайталап көріңіз.")
+    except Exception:
+        log.exception("forward failed")
 
-async def admin_message_handler(message: Message):
-    # Admin commands and panel states.
-    if message.text and message.text.startswith("/"):
-        return
-    state_row = await db.execute("SELECT * FROM admin_state WHERE admin_id=?", (ADMIN_ID,))
-    state = await state_row.fetchone()
-    if state and state["state"] in ("add_content", "add_preview", "broadcast_draft"):
-        await process_admin_upload(message, state)
-        return
-    if message.reply_to_message:
-        cur = await db.execute(
-            "SELECT user_id FROM admin_message_map WHERE admin_message_id=?",
-            (message.reply_to_message.message_id,),
-        )
-        mapped = await cur.fetchone()
-        if mapped:
-            target_id = mapped["user_id"]
-            try:
-                await bot.copy_message(
-                    chat_id=target_id, from_chat_id=message.chat.id,
-                    message_id=message.message_id
-                )
-                await message.reply("✅ Жауап жіберілді.")
-            except TelegramForbiddenError:
-                await message.reply("Қолданушы ботты бұғаттаған немесе оған хабарлама жіберу мүмкін емес.")
-            except TelegramAPIError as e:
-                await message.reply(f"Жіберу қатесі: {e}")
-            return
-    await message.answer("Админ панелін ашу: /admin")
-
-# --------------------------- ADMIN PANEL ---------------------------
-
-def admin_keyboard():
-    return ikb([
-        [btn("📂 Контент басқару", "adm:content"), btn("📊 Статистика", "adm:stats")],
-        [btn("📢 Рассылка", "adm:broadcast"), btn("👥 Қолданушылар", "adm:users")],
-        [btn("🚫 Бұғаттау", "adm:block"), btn("🎁 Реферал баптауы", "adm:ref")],
-        [btn("🔗 Тегін канал сілтемесі", "adm:freeurl")],
-        [btn("⏹ Рассылканы тоқтату", "adm:stop"), btn("🏠 Жабу", "adm:close")],
-    ])
-
+# ====================== ADMIN ======================
 @router.message(Command("admin"))
-async def admin_command(message: Message):
+async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
-    await message.answer("🛠 ӘКІМШІ БАСҚАРУ ПАНЕЛІ", reply_markup=admin_keyboard())
+    await message.answer("🛠 ӘКІМШІ ПАНЕЛІ", reply_markup=admin_kb())
 
 @router.callback_query(F.data.startswith("adm:"))
-async def admin_callbacks(call: CallbackQuery):
+async def admin_actions(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
-        await call.answer("Рұқсат жоқ", show_alert=True)
-        return
-    action = call.data.split(":", 1)[1]
+        return await call.answer("Рұқсат жоқ", show_alert=True)
+
+    action = call.data.split(":")[1]
     await call.answer()
+
     if action == "close":
         with suppress(TelegramAPIError):
             await call.message.delete()
         return
+
     if action == "content":
         rows = [[btn(CATEGORY_LABELS[c]["kk"], f"admcat:{c}")] for c in CATEGORIES]
-        rows += [[btn("⬅️ Админ меню", "adm:back")]]
+        rows.append([btn("⬅️ Артқа", "adm:back")])
         await call.message.edit_text("Контент жүктейтін категорияны таңдаңыз:", reply_markup=ikb(rows))
+
     elif action == "stats":
         cur = await db.execute("SELECT COUNT(*) n FROM users")
         total = (await cur.fetchone())["n"]
-        cur = await db.execute("SELECT COUNT(*) n FROM users WHERE is_blocked=1")
-        blocked = (await cur.fetchone())["n"]
         cur = await db.execute("SELECT COUNT(*) n FROM users WHERE is_blocked=0")
         active = (await cur.fetchone())["n"]
+        cur = await db.execute("SELECT COUNT(*) n FROM users WHERE is_blocked=1")
+        blocked = (await cur.fetchone())["n"]
         cur = await db.execute("SELECT COUNT(*) n FROM referrals")
         refs = (await cur.fetchone())["n"]
         cur = await db.execute("SELECT COUNT(*) n FROM users WHERE reward_sent=1")
         rewards = (await cur.fetchone())["n"]
         cur = await db.execute("SELECT COUNT(*) n FROM purchases")
-        purchases_count = (await cur.fetchone())["n"]
-        cur = await db.execute("SELECT language,COUNT(*) n FROM users GROUP BY language")
+        buys = (await cur.fetchone())["n"]
+        cur = await db.execute("SELECT language, COUNT(*) n FROM users GROUP BY language")
         langs = await cur.fetchall()
-        lang_text = "\n".join(f"{r['language']}: {r['n']}" for r in langs) or "—"
-        await call.message.edit_text(
-            f"📊 СТАТИСТИКА\n\n👥 Барлығы: {total}\n🟢 Бот ішіндегі белсенді: {active}\n🚫 Ішкі бұғатта: {blocked}\n🔗 Шақырылғандар: {refs}\n🎁 Тегін канал алғандар: {rewards}\n🛒 Сатып алу өтініштері: {purchases_count}\n\n🌐 Тілдер:\n{lang_text}",
-            reply_markup=ikb([[btn("⬅️ Админ меню", "adm:back")]])
+        lang_txt = "\n".join(f"  {r['language'] or '—'}: {r['n']}" for r in langs) or "  —"
+
+        text = (
+            f"📊 СТАТИСТИКА\n\n"
+            f"👥 Барлығы: {total}\n"
+            f"🟢 Белсенді: {active}\n"
+            f"🚫 Бұғатталған: {blocked}\n"
+            f"🔗 Шақырылған: {refs}\n"
+            f"🎁 Тегін алған: {rewards}\n"
+            f"🛒 Сатып алу: {buys}\n\n"
+            f"🌐 Тілдер:\n{lang_txt}"
         )
+        await call.message.edit_text(text, reply_markup=ikb([[btn("⬅️ Артқа", "adm:back")]]))
+
     elif action == "broadcast":
         await db.execute(
-            "INSERT INTO admin_state(admin_id,state,category,payload) VALUES(?,?,?,?) "
-            "ON CONFLICT(admin_id) DO UPDATE SET state=excluded.state,category=NULL,payload=NULL",
-            (ADMIN_ID, "broadcast_draft", None, None),
+            "INSERT INTO admin_state(admin_id, state, category) VALUES (?,?,NULL) "
+            "ON CONFLICT(admin_id) DO UPDATE SET state=excluded.state, category=NULL",
+            (ADMIN_ID, "broadcast_draft")
         )
         await db.commit()
-        await call.message.answer("📢 Рассылкаға жіберілетін мәтінді, фотоны немесе видеоны жіберіңіз. Тоқтату үшін /cancel.")
-    elif action == "users":
-        await call.message.edit_text(
-            "Қолданушыны ID арқылы бұғаттау/бұғаттан шығару үшін:\n/block 123456789\n/unblock 123456789",
-            reply_markup=ikb([[btn("⬅️ Админ меню", "adm:back")]])
-        )
-    elif action == "block":
-        await call.message.edit_text(
-            "Қолданушыны бұғаттау: /block ID\nБұғаттан шығару: /unblock ID",
-            reply_markup=ikb([[btn("⬅️ Админ меню", "adm:back")]])
-        )
+        await call.message.answer("📢 Рассылкаға мәтін / фото / видео жіберіңіз.\nТоқтату: /cancel")
+
     elif action == "ref":
-        required = await setting("referral_required", "3")
+        req = await setting("referral_required", "3")
         await call.message.edit_text(
-            f"Қазіргі талап: {required} адам.\nӨзгерту: /setref 5",
-            reply_markup=ikb([[btn("⬅️ Админ меню", "adm:back")]])
+            f"Қазіргі талап: {req} адам\nӨзгерту: /setref 5",
+            reply_markup=ikb([[btn("⬅️ Артқа", "adm:back")]])
         )
+
     elif action == "freeurl":
         url = await setting("free_channel_url", "")
         await call.message.edit_text(
-            f"Қазіргі сілтеме: {url or 'орнатылмаған'}\nЖаңа сілтеме енгізу: /setfree https://t.me/...",
-            reply_markup=ikb([[btn("⬅️ Админ меню", "adm:back")]])
+            f"Қазіргі сілтеме:\n{url or 'орнатылмаған'}\n\nЖаңа: /setfree https://t.me/...",
+            reply_markup=ikb([[btn("⬅️ Артқа", "adm:back")]])
         )
+
+    elif action == "block":
+        await call.message.edit_text(
+            "Бұғаттау: /block 123456789\nШығару: /unblock 123456789",
+            reply_markup=ikb([[btn("⬅️ Артқа", "adm:back")]])
+        )
+
     elif action == "stop":
         await stop_broadcast()
         await call.message.answer("⏹ Белсенді рассылка тоқтатылды.")
+
     elif action == "back":
-        await call.message.edit_text("🛠 ӘКІМШІ БАСҚАРУ ПАНЕЛІ", reply_markup=admin_keyboard())
+        await call.message.edit_text("🛠 ӘКІМШІ ПАНЕЛІ", reply_markup=admin_kb())
 
 @router.callback_query(F.data.startswith("admcat:"))
-async def admin_category_callback(call: CallbackQuery):
+async def admin_cat(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
-        await call.answer("Рұқсат жоқ", show_alert=True)
         return
-    category = call.data.split(":", 1)[1]
-    if category not in CATEGORIES:
-        await call.answer()
+    cat = call.data.split(":")[1]
+    if cat not in CATEGORIES:
         return
     await db.execute(
-        "INSERT INTO admin_state(admin_id,state,category,payload) VALUES(?,?,?,?) "
-        "ON CONFLICT(admin_id) DO UPDATE SET state=excluded.state,category=excluded.category,payload=NULL",
-        (ADMIN_ID, "add_content", category, None),
+        "INSERT INTO admin_state(admin_id, state, category) VALUES (?,?,?) "
+        "ON CONFLICT(admin_id) DO UPDATE SET state=excluded.state, category=excluded.category",
+        (ADMIN_ID, "add_content", cat)
     )
     await db.commit()
     await call.answer()
     await call.message.answer(
-        f"{CATEGORY_LABELS[category]['kk']} бөліміне жарияланатын фото/видео/мәтінді жіберіңіз.\n"
-        "Жіберілген материал бірден осы категорияға қосылады. Тоқтату: /cancel"
+        f"{CATEGORY_LABELS[cat]['kk']} бөліміне фото/видео/мәтін жіберіңіз.\n"
+        f"Тоқтату: /cancel"
     )
 
-async def process_admin_upload(message: Message, state):
-    mode = state["state"]
-    category = state["category"]
-    table = "content"
+# ====================== ADMIN UPLOAD & REPLY ======================
+@router.message(F.from_user.id == ADMIN_ID)
+async def admin_message(message: Message):
+    if message.text and message.text.startswith("/"):
+        return
+
+    # Admin state
+    cur = await db.execute("SELECT * FROM admin_state WHERE admin_id=?", (ADMIN_ID,))
+    state = await cur.fetchone()
+
+    if state:
+        if state["state"] == "broadcast_draft":
+            await create_broadcast(message)
+            return
+        if state["state"] == "add_content":
+            await process_upload(message, state["category"])
+            return
+
+    # Reply to user
+    if message.reply_to_message:
+        cur = await db.execute(
+            "SELECT user_id FROM admin_message_map WHERE admin_message_id=?",
+            (message.reply_to_message.message_id,)
+        )
+        mapped = await cur.fetchone()
+        if mapped:
+            try:
+                await bot.copy_message(
+                    chat_id=mapped["user_id"],
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
+                await message.reply("✅ Жауап жіберілді")
+            except TelegramForbiddenError:
+                await message.reply("Қолданушы ботты бұғаттаған")
+            except Exception as e:
+                await message.reply(f"Қате: {e}")
+            return
+
+    await message.answer("Админ панелі: /admin")
+
+async def process_upload(message: Message, category: str):
     if message.text and message.text.startswith("/cancel"):
         await db.execute("DELETE FROM admin_state WHERE admin_id=?", (ADMIN_ID,))
         await db.commit()
-        await message.answer("Әрекет тоқтатылды.", reply_markup=admin_keyboard())
+        await message.answer("Тоқтатылды", reply_markup=admin_kb())
         return
+
     typ, file_id, caption = None, None, message.caption or ""
     if message.photo:
         typ, file_id = "photo", message.photo[-1].file_id
@@ -713,78 +716,77 @@ async def process_admin_upload(message: Message, state):
     elif message.text:
         typ, caption = "text", message.text
     else:
-        await message.answer("Бұл формат әзірге қолдау таппайды. Мәтін, фото, видео, құжат немесе GIF жіберіңіз.")
+        await message.answer("Қолдау көрсетілетін формат: мәтін, фото, видео, құжат, GIF")
         return
+
     await db.execute(
-        f"INSERT INTO {table}(category,file_type,file_id,caption,created_at) VALUES(?,?,?,?,?)",
-        (category, typ, file_id, caption, int(time.time())),
+        "INSERT INTO content(category, file_type, file_id, caption, created_at) VALUES (?,?,?,?,?)",
+        (category, typ, file_id, caption, int(time.time()))
     )
     await db.commit()
-    await message.answer("✅ Материал сақталды. Тағы жіберіңіз немесе /cancel басыңыз.")
+    await message.answer("✅ Сақталды. Тағы жіберіңіз немесе /cancel")
 
-# --------------------------- ADMIN COMMANDS ---------------------------
-
+# ====================== ADMIN COMMANDS ======================
 @router.message(Command("cancel"))
-async def cancel_admin_state(message: Message):
+async def cancel(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     await db.execute("DELETE FROM admin_state WHERE admin_id=?", (ADMIN_ID,))
     await db.commit()
-    await message.answer("Әрекет тоқтатылды.", reply_markup=admin_keyboard())
+    await message.answer("Тоқтатылды", reply_markup=admin_kb())
 
 @router.message(Command("setref"))
-async def set_ref_command(message: Message):
+async def setref(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) < 1:
-        await message.answer("Қолдану: /setref 3")
-        return
+        return await message.answer("Қолдану: /setref 3")
     await set_setting("referral_required", parts[1])
-    await message.answer(f"✅ Жаңа талап: {parts[1]} адам.")
-    cur = await db.execute("SELECT user_id FROM users WHERE reward_sent=0 AND referral_count>=?", (int(parts[1]),))
+    await message.answer(f"✅ Жаңа талап: {parts[1]}")
+    # Барлық кім жеткен болса — сыйлық беру
+    cur = await db.execute(
+        "SELECT user_id FROM users WHERE reward_sent=0 AND referral_count >= ?",
+        (int(parts[1]),)
+    )
     for row in await cur.fetchall():
         await check_referral_reward(row["user_id"])
 
 @router.message(Command("setfree"))
-async def set_free_command(message: Message):
+async def setfree(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) != 2 or not parts[1].startswith(("https://t.me/", "https://telegram.me/")):
-        await message.answer("Қолдану: /setfree https://t.me/канал")
-        return
+        return await message.answer("Қолдану: /setfree https://t.me/канал")
     await set_setting("free_channel_url", parts[1].strip())
-    await message.answer("✅ Тегін канал сілтемесі сақталды.")
+    await message.answer("✅ Тегін канал сілтемесі сақталды")
 
 @router.message(Command("block"))
-async def block_command(message: Message):
+async def block(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("Қолдану: /block 123456789")
-        return
+        return await message.answer("Қолдану: /block 123456789")
     uid = int(parts[1])
     await db.execute("UPDATE users SET is_blocked=1 WHERE user_id=?", (uid,))
     await db.commit()
-    await message.answer(f"🚫 {uid} боттың ішкі қара тізіміне қосылды.")
+    await message.answer(f"🚫 {uid} бұғатталды")
 
 @router.message(Command("unblock"))
-async def unblock_command(message: Message):
+async def unblock(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("Қолдану: /unblock 123456789")
-        return
+        return await message.answer("Қолдану: /unblock 123456789")
     uid = int(parts[1])
     await db.execute("UPDATE users SET is_blocked=0 WHERE user_id=?", (uid,))
     await db.commit()
-    await message.answer(f"✅ {uid} бұғаттан шығарылды.")
+    await message.answer(f"✅ {uid} шығарылды")
 
-# --------------------------- BROADCAST ENGINE ---------------------------
-
+# ====================== BROADCAST ======================
 broadcast_task: Optional[asyncio.Task] = None
 broadcast_lock = asyncio.Lock()
 
@@ -801,46 +803,52 @@ async def create_broadcast(message: Message):
     elif message.text:
         typ, caption = "text", message.text
     else:
-        await message.answer("Бұл формат қолдау таппайды.")
+        await message.answer("Формат қолдау таппайды")
         return
+
     cur = await db.execute(
-        "INSERT INTO broadcast_jobs(status,file_type,file_id,caption,created_at) VALUES('queued',?,?,?,?)",
-        (typ, file_id, caption, int(time.time())),
+        "INSERT INTO broadcast_jobs(status, file_type, file_id, caption, created_at) VALUES ('queued',?,?,?,?)",
+        (typ, file_id, caption, int(time.time()))
     )
     job_id = cur.lastrowid
+
     cur = await db.execute("SELECT user_id FROM users WHERE is_blocked=0 ORDER BY user_id")
     users = await cur.fetchall()
     await db.executemany(
-        "INSERT OR IGNORE INTO broadcast_recipients(job_id,user_id,status) VALUES(?,?,'pending')",
-        [(job_id, row["user_id"]) for row in users],
+        "INSERT OR IGNORE INTO broadcast_recipients(job_id, user_id, status) VALUES (?,?, 'pending')",
+        [(job_id, r["user_id"]) for r in users]
     )
     await db.commit()
-    await message.answer(f"📢 Рассылка #{job_id} дайын. Алушылар: {len(users)}.\nБастау: /startbroadcast {job_id}")
+
+    await message.answer(
+        f"📢 Рассылка #{job_id} дайын\n"
+        f"Алушылар: {len(users)}\n"
+        f"Бастау: /startbroadcast {job_id}"
+    )
     await db.execute("DELETE FROM admin_state WHERE admin_id=?", (ADMIN_ID,))
     await db.commit()
 
 @router.message(Command("startbroadcast"))
-async def start_broadcast_command(message: Message):
+async def start_bc(message: Message):
     global broadcast_task
     if message.from_user.id != ADMIN_ID:
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("Қолдану: /startbroadcast JOB_ID")
-        return
+        return await message.answer("Қолдану: /startbroadcast JOB_ID")
+
     job_id = int(parts[1])
     cur = await db.execute("SELECT status FROM broadcast_jobs WHERE id=?", (job_id,))
     job = await cur.fetchone()
     if not job:
-        await message.answer("Рассылка табылмады.")
-        return
+        return await message.answer("Табылмады")
     if broadcast_task and not broadcast_task.done():
-        await message.answer("Басқа рассылка жүріп жатыр.")
-        return
+        return await message.answer("Басқа рассылка жүріп жатыр")
+
     await db.execute("UPDATE broadcast_jobs SET status='running' WHERE id=?", (job_id,))
     await db.commit()
     broadcast_task = asyncio.create_task(run_broadcast(job_id))
-    await message.answer(f"▶️ Рассылка #{job_id} басталды. Тоқтату: /stopbroadcast")
+    await message.answer(f"▶️ #{job_id} басталды\nТоқтату: /stopbroadcast")
 
 async def run_broadcast(job_id: int):
     async with broadcast_lock:
@@ -848,64 +856,65 @@ async def run_broadcast(job_id: int):
         job = await cur.fetchone()
         if not job:
             return
-        delay = float(await setting("broadcast_delay", "0.08"))
+
+        delay = float(await setting("broadcast_delay", "0.07"))
+
         while True:
             cur = await db.execute(
                 """SELECT r.user_id FROM broadcast_recipients r
-                   JOIN users u ON u.user_id=r.user_id
+                   JOIN users u ON u.user_id = r.user_id
                    WHERE r.job_id=? AND r.status='pending' AND u.is_blocked=0
                    ORDER BY r.user_id LIMIT 1""",
-                (job_id,),
+                (job_id,)
             )
             recipient = await cur.fetchone()
             if not recipient:
                 await db.execute("UPDATE broadcast_jobs SET status='completed' WHERE id=?", (job_id,))
                 await db.commit()
-                with suppress(TelegramAPIError):
-                    await bot.send_message(ADMIN_ID, f"✅ Рассылка #{job_id} аяқталды.")
+                with suppress(Exception):
+                    await bot.send_message(ADMIN_ID, f"✅ Рассылка #{job_id} аяқталды")
                 return
-            uid = recipient["user_id"]
+
+            # status check
             cur = await db.execute("SELECT status FROM broadcast_jobs WHERE id=?", (job_id,))
-            status = (await cur.fetchone())["status"]
-            if status != "running":
+            if (await cur.fetchone())["status"] != "running":
                 return
+
+            uid = recipient["user_id"]
             try:
-                if job["file_type"] == "text":
-                    await bot.send_message(uid, job["caption"])
-                else:
-                    # Sending stored file_id through the corresponding Bot API method.
-                    fake = {"file_type": job["file_type"], "file_id": job["file_id"], "caption": job["caption"]}
-                    await send_stored_content(uid, fake)
+                fake = {"file_type": job["file_type"], "file_id": job["file_id"], "caption": job["caption"]}
+                await send_content(uid, fake)
                 await db.execute(
                     "UPDATE broadcast_recipients SET status='sent' WHERE job_id=? AND user_id=?",
-                    (job_id, uid),
+                    (job_id, uid)
                 )
                 await db.execute(
-                    "UPDATE broadcast_jobs SET sent_count=sent_count+1,last_user_id=? WHERE id=?",
-                    (uid, job_id),
+                    "UPDATE broadcast_jobs SET sent_count = sent_count + 1 WHERE id=?",
+                    (job_id,)
                 )
             except TelegramRetryAfter as e:
                 await db.commit()
                 await asyncio.sleep(e.retry_after + 1)
                 continue
             except TelegramForbiddenError:
-                await db.execute("UPDATE users SET is_blocked=0 WHERE user_id=?", (uid,))
                 await db.execute(
                     "UPDATE broadcast_recipients SET status='failed' WHERE job_id=? AND user_id=?",
-                    (job_id, uid),
+                    (job_id, uid)
                 )
-                await db.execute("UPDATE broadcast_jobs SET failed_count=failed_count+1 WHERE id=?", (job_id,))
-            except TelegramNetworkError:
-                await db.commit()
-                await asyncio.sleep(5)
-                continue
-            except TelegramAPIError:
-                log.exception("Broadcast failed for %s", uid)
+                await db.execute(
+                    "UPDATE broadcast_jobs SET failed_count = failed_count + 1 WHERE id=?",
+                    (job_id,)
+                )
+            except Exception:
+                log.exception("broadcast fail %s", uid)
                 await db.execute(
                     "UPDATE broadcast_recipients SET status='failed' WHERE job_id=? AND user_id=?",
-                    (job_id, uid),
+                    (job_id, uid)
                 )
-                await db.execute("UPDATE broadcast_jobs SET failed_count=failed_count+1 WHERE id=?", (job_id,))
+                await db.execute(
+                    "UPDATE broadcast_jobs SET failed_count = failed_count + 1 WHERE id=?",
+                    (job_id,)
+                )
             await db.commit()
             await asyncio.sleep(delay)
 
@@ -922,82 +931,31 @@ async def stop_broadcast():
             await broadcast_task
 
 @router.message(Command("stopbroadcast"))
-async def stop_broadcast_command(message: Message):
+async def stop_bc(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     await stop_broadcast()
-    await message.answer("⏹ Рассылка тоқтатылды. Қалған алушылар pending күйінде сақталды.")
+    await message.answer("⏹ Тоқтатылды")
 
-# --------------------------- ADMIN UPLOAD STATE ROUTING ---------------------------
-
-async def process_admin_upload_router(message: Message):
-    cur = await db.execute("SELECT * FROM admin_state WHERE admin_id=?", (ADMIN_ID,))
-    state = await cur.fetchone()
-    if state:
-        await process_admin_upload(message, state)
-
-# Replace the upload state path with a small dispatcher hook:
-# Admin text/media in broadcast_draft creates a queued job; content states save immediately.
-_original_admin_message_handler = admin_message_handler
-
-@router.message(F.from_user.id == ADMIN_ID)
-async def admin_message_handler(message: Message):
-    if message.text and message.text.startswith("/"):
-        return
-    cur = await db.execute("SELECT * FROM admin_state WHERE admin_id=?", (ADMIN_ID,))
-    state = await cur.fetchone()
-    if state:
-        if state["state"] == "broadcast_draft":
-            await create_broadcast(message)
-            return
-        if state["state"] in ("add_content", "add_preview"):
-            await process_admin_upload(message, state)
-            return
-    if message.reply_to_message:
-        cur = await db.execute(
-            "SELECT user_id FROM admin_message_map WHERE admin_message_id=?",
-            (message.reply_to_message.message_id,),
-        )
-        mapped = await cur.fetchone()
-        if mapped:
-            try:
-                await bot.copy_message(
-                    chat_id=mapped["user_id"], from_chat_id=message.chat.id,
-                    message_id=message.message_id
-                )
-                await message.reply("✅ Жауап жіберілді.")
-            except TelegramAPIError as e:
-                await message.reply(f"Жіберу мүмкін болмады: {e}")
-            return
-    await message.answer("Админ панелін ашу: /admin")
-
-# --------------------------- RECOVERY / STARTUP ---------------------------
-
-async def resume_pending_broadcast():
+# ====================== START ======================
+async def resume_pending():
     global broadcast_task
     cur = await db.execute("SELECT id FROM broadcast_jobs WHERE status='running' ORDER BY id DESC LIMIT 1")
     row = await cur.fetchone()
     if row:
-        job_id = row["id"]
-        log.info("Resuming broadcast job %s", job_id)
-        broadcast_task = asyncio.create_task(run_broadcast(job_id))
-
-async def register_commands():
-    await bot.set_my_commands([
-        BotCommand(command="start", description="Ботты бастау"),
-    ])
+        log.info("Resuming broadcast %s", row["id"])
+        broadcast_task = asyncio.create_task(run_broadcast(row["id"]))
 
 async def main():
     global bot
     await init_db()
-    bot = Bot(BOT_TOKEN)
-    await register_commands()
-    await resume_pending_broadcast()
-    log.info("Bot started. DB=%s", DB_PATH)
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    await bot.set_my_commands([BotCommand(command="start", description="Ботты бастау")])
+    await resume_pending()
+    log.info("Bot started | DB=%s", DB_PATH)
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(bot)
     finally:
-        await db.commit()
         await db.close()
         await bot.session.close()
 
