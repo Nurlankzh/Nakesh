@@ -29,8 +29,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 # CONFIG
 # =========================================================
 
-BOT_TOKEN = "9012314155:AAEoGUo4q-0KmSZQKJIasyzX_YeK5YXr9fI"
-ADMIN_ID_RAW = os.getenv("ADMIN_ID", "6303091468")
+BOT_TOKEN = os.getenv("9012314155:AAEoGUo4q-0KmSZQKJIasyzX_YeK5YXr9fI", "").strip()
+ADMIN_ID_RAW = os.getenv("6303091468", "").strip()
 ADMIN_USERNAME_ENV = os.getenv("ADMIN_USERNAME", "")
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -58,6 +58,9 @@ def _resolve_menu_banner_path():
 
 MENU_BANNER_PATH = _resolve_menu_banner_path()
 
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable not found. Set BOT_TOKEN in your environment.")
+
 if not ADMIN_ID_RAW:
     raise RuntimeError("ADMIN_ID environment variable not found")
 
@@ -69,7 +72,7 @@ except ValueError:
 
 DB_NAME = "bot_database.db"
 
-REFERRAL_BONUS = 9
+REFERRAL_BONUS = 50
 DAILY_BONUS = 12
 BONUS_INTERVAL_HOURS = 12
 DEFAULT_VIDEO_COST = 2
@@ -86,9 +89,9 @@ DISCOUNT_FROM = 150
 CONTENT_AUTO_DELETE_MINUTES = 30
 
 # Рассылка қауіпсіздігі: бір хабарлама арасындағы күту (сек)
-BROADCAST_DELAY = 0.12
-BROADCAST_BATCH_PAUSE = 2.5
-BROADCAST_BATCH_SIZE = 20
+BROADCAST_DELAY = 1.0
+BROADCAST_BATCH_PAUSE = 5.0
+BROADCAST_BATCH_SIZE = 15
 
 KZ_TZ = ZoneInfo("Asia/Almaty")
 
@@ -3206,22 +3209,39 @@ async def admin_broadcast_send(message: Message, state: FSMContext, bot: Bot):
             )
             sent += 1
         except Exception as e:
-            failed += 1
-            err = str(e).lower()
-            logging.warning("Broadcast failed for %s: %s", row["user_id"], e)
-            if any(x in err for x in (
-                "blocked", "deactivated", "chat not found",
-                "user is deactivated", "bot was blocked",
-                "forbidden", "peer_id_invalid"
-            )):
+            # Telegram flood control: respect RetryAfter instead of retrying rapidly.
+            retry_after = getattr(e, "retry_after", None)
+            if retry_after is not None:
+                wait_seconds = max(1, int(retry_after) + 1)
+                logging.warning("Telegram rate limit: waiting %s seconds", wait_seconds)
+                await asyncio.sleep(wait_seconds)
                 try:
-                    await db_execute(
-                        "UPDATE users SET is_blocked=1 WHERE user_id=?",
-                        (row["user_id"],)
+                    await bot.copy_message(
+                        chat_id=row["user_id"],
+                        from_chat_id=message.chat.id,
+                        message_id=message.message_id
                     )
-                    blocked_marked += 1
-                except Exception:
-                    pass
+                    sent += 1
+                    e = None
+                except Exception as retry_error:
+                    e = retry_error
+            if e is not None:
+                failed += 1
+                err = str(e).lower()
+                logging.warning("Broadcast failed for %s: %s", row["user_id"], e)
+                if any(x in err for x in (
+                    "blocked", "deactivated", "chat not found",
+                    "user is deactivated", "bot was blocked",
+                    "forbidden", "peer_id_invalid"
+                )):
+                    try:
+                        await db_execute(
+                            "UPDATE users SET is_blocked=1 WHERE user_id=?",
+                            (row["user_id"],)
+                        )
+                        blocked_marked += 1
+                    except Exception:
+                        pass
 
         if i % 15 == 0 or i == total:
             try:
