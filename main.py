@@ -29,8 +29,31 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 # CONFIG
 # =========================================================
 
-BOT_TOKEN = os.getenv("9012314155:AAEoGUo4q-0KmSZQKJIasyzX_YeK5YXr9fI", "").strip()
-ADMIN_ID_RAW = os.getenv("6303091468", "").strip()
+# .env файлын автомат оқу (қосымша кітапхана қажет емес).
+# Хостинг панелінде орнатылған environment variables басым болады.
+def _load_local_env_file():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.isfile(env_path):
+        return
+    try:
+        with open(env_path, "r", encoding="utf-8") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError as exc:
+        logging.warning("Could not read .env file: %s", exc)
+
+
+_load_local_env_file()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+ADMIN_ID_RAW = os.getenv("ADMIN_ID", "").strip()
 ADMIN_USERNAME_ENV = os.getenv("ADMIN_USERNAME", "")
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
