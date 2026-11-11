@@ -2,10 +2,7 @@
 """
 Telegram Content + Referral Bot
 Python 3.11+
-Railway-ready single file.
-
-Install: pip install -U aiogram aiosqlite
-Run: BOT_TOKEN=... ADMIN_ID=... python main.py
+Railway-ready
 """
 
 import asyncio
@@ -29,25 +26,38 @@ from aiogram.types import (
 )
 from aiogram.client.default import DefaultBotProperties
 
-=
 # ====================== CONFIG ======================
-import os
-
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 ADMIN_ID_RAW = (os.getenv("ADMIN_ID") or "8942851703").strip()
-DB_PATH = (os.getenv("DB_PATH") or "bot_data.sqlite3").strip()
+DB_PATH = (os.getenv("DB_PATH") or "/data/bot.sqlite3").strip()
 ADMIN_USERNAME = (os.getenv("ADMIN_USERNAME") or "JOKWRHUB18").strip().lstrip("@")
 
-if not BOT_TOKEN:
-    raise RuntimeError("❌ BOT_TOKEN жоқ. Railway Variables-қа қосыңыз.")
+print("=== DEBUG START ===")
+print(f"BOT_TOKEN length: {len(BOT_TOKEN)}")
+print(f"ADMIN_ID_RAW: '{ADMIN_ID_RAW}'")
+print(f"DB_PATH: '{DB_PATH}'")
+print(f"ADMIN_USERNAME: '{ADMIN_USERNAME}'")
+print("=== DEBUG END ===")
 
-if not ADMIN_ID_RAW or not ADMIN_ID_RAW.isdigit():
-    raise RuntimeError(
-        f"❌ ADMIN_ID дұрыс емес: '{ADMIN_ID_RAW}'\n"
-        "Railway → Variables → ADMIN_ID = 8942851703 (тек сан)"
-    )
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN жоқ")
+
+if not ADMIN_ID_RAW.isdigit():
+    raise RuntimeError(f"ADMIN_ID дұрыс емес: '{ADMIN_ID_RAW}'")
 
 ADMIN_ID = int(ADMIN_ID_RAW)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+log = logging.getLogger("bot")
+
+router = Router()
+dp = Dispatcher()
+dp.include_router(router)
+bot: Optional[Bot] = None
+db: Optional[aiosqlite.Connection] = None
 # ====================== TEXT ======================
 CATEGORIES = ("kz", "kids", "ru", "us")
 
